@@ -1,0 +1,24 @@
+{
+ 	"name": "unlikelysource.com/doctrine-training",
+    "description": "Sample composer.json file for doctrine training",
+    "version": "0.0.1",
+    "type": "library",
+    "homepage": "http://unlikelysource.com/",
+    "time": "2015-04-01",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Doug Bierer",
+            "email": "doug@unlikelysource.com",
+            "homepage": "http://unlikelysource.com/",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "doctrine/orm": "*",
+        "symfony/yaml": "*",
+        "doctrine/mongodb-odm": "dev-master",
+        "doctrine/couchdb": "dev-master",
+        "doctrine/couchdb-odm": "dev-master"
+    }
+}

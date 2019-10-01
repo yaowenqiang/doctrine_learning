@@ -6,9 +6,26 @@
       #ansible-playbook   ansible/playbook.yml -i  ansible/hosts.ini
 
 
-- hosts: localhost
+- hosts: vb
   tasks: 
     - command: "/bin/echo 'inside play #2'"
+    - name: Update APT Package Manager repositories cache
+      become: true
+      apt:
+          update_cache: yes
+
+    - name: Update Installed packages
+      become: true
+      apt:
+          upgrade: dist
+          #upgrade: safe
+          
+    - name: Install Git VCS
+      become: true
+      apt:
+          name: git
+          state: latest
+
 
 
 - hosts: vb

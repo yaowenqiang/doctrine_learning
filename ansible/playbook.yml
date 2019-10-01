@@ -5,3 +5,17 @@
 
       #ansible-playbook   ansible/playbook.yml -i  ansible/hosts.ini
 
+
+- hosts: localhost
+  tasks: 
+    - command: "/bin/echo 'inside play #2'"
+
+
+- hosts: vb
+  tasks: 
+    - name: Install cowsay - it's probably important
+      apt:
+          name: cowsay
+      become: true
+      #become: yes
+

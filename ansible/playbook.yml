@@ -1,5 +1,6 @@
 ---
 - hosts: all
+
   tasks: 
     - ping: ~
 
@@ -7,8 +8,12 @@
 
 
 - hosts: vb
+  vars:
+    server_name: mootube.l
+    symfony_root_dir: /var/www/project
+    symfony_web_dir: "{{ symfony_root_dir }}/web"
+    symfony_var_dir: "{{ symfony_root_dir }}/var"
   tasks: 
-    - command: "/bin/echo 'inside play #2'"
     - name: Update APT Package Manager repositories cache
       become: true
       apt:
@@ -19,7 +24,15 @@
       apt:
           upgrade: dist
           #upgrade: safe
-          
+    - name: Install low-level utilities
+      become: true
+      apt:
+          name: "{{ item }}"
+          state: latest
+      with_items:
+          - zip
+          - unzip
+
     - name: Install Git VCS
       become: true
       apt:
@@ -30,6 +43,13 @@
       become: true
       apt:
           name: nginx
+          state: latest
+      notify: Restart Nginx
+
+    - name: Install tmux
+      become: true
+      apt:
+          name: tmux
           state: latest
 
     - name: Install MySQL DB server
@@ -64,7 +84,9 @@
           - php-redis
           - php-memcache
           - php-apcu
+          - php-xml
           - php-xdebug
+      notify: Restart PHP-FPM
 
     - name: Set date.timezone for CLI
       become: true
@@ -79,7 +101,78 @@
           dest: /etc/php/7.3/fpm/php.ini
           regexp: "timezone = "
           line: "date.timezone = PRC"
+      notify: Restart PHP-FPM
 
+    - name: Create project directory and set its permissions
+      become: true
+      file:
+          path: "{{ symfony_root_dir }}"
+          state: directory
+          owner:  "{{ ansible_user }}"
+          group:  "{{ ansible_user }}"
+          recurse: true
+
+    - name: Checkout Git repository
+      git:
+          repo: https://github.com/symfony/symfony-standard.git
+          dest: "{{ symfony_root_dir }}"
+          force: yes
+
+    - name: Download composer
+      script: ../scripts/install_composer.sh
+
+    - name: Move Composer globally 
+      become: true
+      command: "mv composer.phar /usr/local/bin/composer"
+
+    - name: Set permissions on composer
+      become: true
+      file:
+        path: /usr/local/bin/composer
+        mode: "a+x"
+
+    - name: use ali composer image
+      become: true
+      command: "composer config -g repo.packagist composer https://mirrors.aliyun.com/composer/"
+
+    - name: Install composer dependencies
+      composer:
+        working_dir: "{{ symfony_root_dir }}"
+        no_dev: no
+
+    - name: Add Symfony config template to the Nginx avaiable sites
+      become: true
+      template:
+        src: ../templates/symfony.conf
+        dest: "/etc/nginx/sites-available/{{ server_name }}.conf"
+      notify: Restart Nginx
+
+    - name: Enable Symfony config template from Nginx available sites
+      become: true
+      file:
+        src: "/etc/nginx/sites-available/{{ server_name }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ server_name }}.conf"
+        state: link
+      notify: Restart Nginx
+
+    - name: Add enabled Nginx site /etc/hosts
+      become: true
+      lineinfile:
+        dest: /etc/hosts
+        regexp: "{{ server_name }}"
+        line: " 127.0.0.1 {{ server_name }}"
+
+    - name: fix var directory permissions
+      file: 
+        path: "{{ symfony_var_dir }}"
+        state: directory
+        mode: 0777
+        recurse: yes
+
+        
+
+        
+       
 
 - hosts: vb
   tasks: 
@@ -89,3 +182,14 @@
       become: true
       #become: yes
 
+
+  handlers:
+  - name: Restart Nginx
+    service:
+      name: nginx
+      status: restarted
+
+  - name: Restart PHP-FPM
+    service:
+      name: php-fpm
+      status: restarted

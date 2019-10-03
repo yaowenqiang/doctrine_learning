@@ -13,7 +13,28 @@
     symfony_root_dir: /var/www/project
     symfony_web_dir: "{{ symfony_root_dir }}/web"
     symfony_var_dir: "{{ symfony_root_dir }}/var"
+    symfony_onsole_dir: "{{ symfony_root_dir }}/bin/console"
+    mysql_root_pass: "ywq123"
+
+#  vars_prompt:
+#    - name: symfony_env
+#      prompt: "Enter the environment for your Symfony app (prod|dev|test"
+#      default: prod
+#      private: no
+#
+#  environment:
+#    $SYMFONY_ENV: "{{ symfony_env | lower }}"
+
+#  pre_tasks:
+#    - name: Convert entered Symfony environment to lowercase
+
   tasks: 
+    - debug:
+        var: ansible_env
+
+    - debug:
+        var: symfony_env
+
     - name: Update APT Package Manager repositories cache
       become: true
       apt:
@@ -52,11 +73,39 @@
           name: tmux
           state: latest
 
+    #- name: Mysql | Set root password
+    #  shell: debconf-set-selections <<< 'mysql-server mysql-server/root_password password 123456'
+    #  become: true
+    #  tags:
+    #    - set_mysql_password
+
+    #- name: Mysql | Set root repassword
+    #  become: true
+    #  shell: debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password 123456'
+    #  tags:
+    #    - mysql
+
+
+
+
+
+    - name: Set MySQL root password before installing
+      become: true
+      debconf: name='mysql-server' question='mysql-server/root_password' value='{{mysql_root_pass | quote}}' vtype='password'
+    - name: Confirm MySQL root password before installing
+      become: true
+      debconf: name='mysql-server' question='mysql-server/root_password_again' value='{{mysql_root_pass | quote}}' vtype='password'
+
+
+
     - name: Install MySQL DB server
       become: true
       apt:
           name: mysql-server
           state: latest
+      tags:
+        - mysql
+
 
 
     - name: Install PHP 7 PPA repository
@@ -76,29 +125,30 @@
           name: "{{ item }}"
           state: latest
       with_items:
-          - php-cli
-          - php-curl
-          - php-fpm
-          - php-intl
-          - php-mysql
-          - php-redis
-          - php-memcache
-          - php-apcu
-          - php-xml
-          - php-xdebug
+          - php7.1-cli
+          - php7.1-curl
+          - php7.1-fpm
+          - php7.1-intl
+          - php7.1-mysql
+          - php7.1-redis
+          - php7.1-memcache
+          - php7.1-apcu
+          - php7.1-xml
+      tags:
+        - php-install
       notify: Restart PHP-FPM
 
     - name: Set date.timezone for CLI
       become: true
       lineinfile:
-          dest: /etc/php/7.3/cli/php.ini
+          dest: /etc/php/7.1/cli/php.ini
           regexp: "timezone = "
           line: "date.timezone = PRC"
 
     - name: Set date.timezone for FPM
       become: true
       lineinfile:
-          dest: /etc/php/7.3/fpm/php.ini
+          dest: /etc/php/7.1/fpm/php.ini
           regexp: "timezone = "
           line: "date.timezone = PRC"
       notify: Restart PHP-FPM
@@ -111,34 +161,83 @@
           owner:  "{{ ansible_user }}"
           group:  "{{ ansible_user }}"
           recurse: true
+      tags:
+        - deploy
+
 
     - name: Checkout Git repository
+      become: true
       git:
-          repo: https://github.com/symfony/symfony-standard.git
+          #repo: https://github.com/symfony/symfony-standard.git
+          repo: https://github.com/knpuniversity/ansible.git
           dest: "{{ symfony_root_dir }}"
           force: yes
+      tags:
+        - clone
+
+    - name:  Check for composer
+      stat: 
+        path: /usr/local/bin/composer
+      register: composer_stat
+      tags:
+        - install_composer
+
+    - debug:
+        var: composer_stat
+      tags:
+        - install_composer
+
 
     - name: Download composer
+      when: not composer_stat.stat.exists
       script: ../scripts/install_composer.sh
+      tags:
+        - install_composer
+
 
     - name: Move Composer globally 
+      when: not composer_stat.stat.exists
       become: true
       command: "mv composer.phar /usr/local/bin/composer"
+      tags:
+        - install_composer
+
 
     - name: Set permissions on composer
+      when: not composer_stat.stat.exists
       become: true
       file:
         path: /usr/local/bin/composer
         mode: "a+x"
+      tags:
+        - install_composer
+
+    - name: Make sure Composer is at its latest version
+      composer:
+        working_dir: "{{ symfony_root_dir }}"
+        command: self-update
+      when: composer_stat.stat.exists
+      register: composer_self_update
+      changed_when: "not composer_self_update.stdout | search 'You are already using composer version'"
+      tags:
+        - deploy
+
+          
 
     - name: use ali composer image
       become: true
       command: "composer config -g repo.packagist composer https://mirrors.aliyun.com/composer/"
+      tags:
+        - install_deploy
+
 
     - name: Install composer dependencies
       composer:
         working_dir: "{{ symfony_root_dir }}"
         no_dev: no
+      tags:
+        - deploy
+
 
     - name: Add Symfony config template to the Nginx avaiable sites
       become: true
@@ -162,12 +261,47 @@
         regexp: "{{ server_name }}"
         line: " 127.0.0.1 {{ server_name }}"
 
-    - name: fix var directory permissions
+    - name: Fix var directory permissions
       file: 
         path: "{{ symfony_var_dir }}"
         state: directory
         mode: 0777
         recurse: yes
+      tags:
+        - permission
+
+# symfony console commands
+
+    - name: Create DB if not exists
+# fact
+      register: db_create_result
+      #changed_when: false
+      changed_when: "not db_create_result.stdout | search 'already exists, Skipped'"
+      command: "{{ symfony_onsole_dir }} doctrine:database:create ---kf-not-exists"
+      tags:
+        - deploy
+
+    - debug:
+        var: db_create_result
+      tags:
+        - deploy
+
+
+
+    - name: Execute migrations
+      register: db_migrations_result
+      #changed_when: false
+      changed_when: "not db_migrations.stdout | search 'No migrations to execute'"
+      command: "{{ symfony_onsole_dir }} doctrine:database:migrations:migrate ---no-intraction"
+
+    - name: load data fixtures
+      changed_when: false
+      command: "{{ symfony_onsole_dir }} hautelook_alice:doctrine:fixtures:load  --no-interaction"
+
+    - name: Clear cache
+      command: "{{ symfony_onsole_dir }} cache:clear --env=prod" 
+
+        
 
         
 
@@ -181,6 +315,7 @@
           name: cowsay
       become: true
       #become: yes
+
 
 
   handlers:

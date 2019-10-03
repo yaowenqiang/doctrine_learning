@@ -218,10 +218,9 @@
         command: self-update
       when: composer_stat.stat.exists
       register: composer_self_update
-      changed_when: "not composer_self_update.stdout | search 'You are already using composer version'"
+      changed_when: "not composer_self_update.msg | search( 'You are already using composer')"
       tags:
-        - deploy
-
+        - install_composer
           
 
     - name: use ali composer image
